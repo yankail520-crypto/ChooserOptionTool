@@ -1,0 +1,8 @@
+{
+  "raw_stock_prices": true,
+  "raw_vix": false,
+  "raw_treasury_rates": false,
+  "raw_news": false,
+  "raw_option_chain": false,
+  "raw_dividends": false
+}
