@@ -1,0 +1,39 @@
+name: 每日数据更新
+
+on:
+  schedule:
+    - cron: '0 22 * * 1-5'   # 周一到周五 UTC 22:00(对应美股收盘后),按需调整
+  workflow_dispatch:          # 允许在GitHub页面手动点击触发,方便调试
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
+
+      - name: 安装Python环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 采集原始数据(raw_stock_prices / vix / rates / news / dividends)
+        run: python -m co_data_pipeline.engine
+        env:
+          ALPHA_VANTAGE_KEY: ${{ secrets.ALPHA_VANTAGE_KEY }}
+
+      - name: 计算特征宽表(feature_daily)
+        run: python -m co_features.engine
+        env:
+          ALPHA_VANTAGE_KEY: ${{ secrets.ALPHA_VANTAGE_KEY }}
+
+      - name: 提交更新后的数据文件
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add data/raw/ data/features/
+          git commit -m "自动更新数据 $(date +'%Y-%m-%d')" || echo "无变化，跳过提交"
+          git push
