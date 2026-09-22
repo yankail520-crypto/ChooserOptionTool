@@ -1,7 +1,6 @@
-numpy==2.5.3
-pandas==3.0.6
-pandas_datareader==0.11.1
-python-dotenv==1.2.3
-Requests==2.34.2
+numpy
+pandas
+python-dotenv
+requests
 pyarrow
 pandas_datareader
