@@ -25,6 +25,7 @@ def _clean_dividends(df: pd.DataFrame) -> pd.DataFrame:
             df[col] = pd.to_datetime(df[col], errors="coerce")
 
     df = df.sort_values("ex_date").reset_index(drop=True)
+
     return df
 
 

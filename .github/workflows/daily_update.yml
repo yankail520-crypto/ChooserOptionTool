@@ -2,38 +2,73 @@ name: 每日数据更新
 
 on:
   schedule:
-    - cron: '0 22 * * 1-5'   # 周一到周五 UTC 22:00(对应美股收盘后),按需调整
-  workflow_dispatch:          # 允许在GitHub页面手动点击触发,方便调试
+    # 周一到周五 UTC 22:00（美东夏令时 18:00 / 冬令时 17:00，均在收盘之后）
+    # 注意：GitHub 的定时任务在高峰期可能延迟几十分钟
+    - cron: '0 22 * * 1-5'
+  workflow_dispatch:          # 允许在 GitHub 页面手动触发，方便调试
+
+# 需要推送数据文件回仓库，默认的 GITHUB_TOKEN 在新仓库中可能只有读权限
+permissions:
+  contents: write
+
+# 同一时间只运行一个更新任务，避免手动触发和定时任务同时推送产生冲突
+concurrency:
+  group: daily-data-update
+  cancel-in-progress: false
 
 jobs:
   update-data:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+
     steps:
       - name: 拉取仓库代码
         uses: actions/checkout@v4
 
-      - name: 安装Python环境
+      - name: 安装 Python 环境
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'        # 缓存依赖，加快后续运行
 
       - name: 安装依赖
         run: pip install -r requirements.txt
 
-      - name: 采集原始数据(raw_stock_prices / vix / rates / news / dividends)
+      - name: 采集原始数据（raw_stock_prices / vix / rates / news / dividends）
         run: python -m co_data_pipeline.engine
         env:
           ALPHA_VANTAGE_KEY: ${{ secrets.ALPHA_VANTAGE_KEY }}
+          # 其他数据源如需密钥，在这里一并传入，例如：
+          # FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+          # NEWS_API_KEY: ${{ secrets.NEWS_API_KEY }}
 
-      - name: 计算特征宽表(feature_daily)
+      # IQR 检测只打警告、始终成功退出，不会阻断后续步骤；
+      # 报告作为构件上传，可在本次运行页面的 Artifacts 中下载查看
+      - name: 数据质量检查
+        run: python -m co_features.iqr_check --report quality_report.csv   # 按脚本实际位置调整模块路径
+
+      - name: 上传质量检查报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-report-${{ github.run_id }}
+          path: quality_report.csv
+          if-no-files-found: warn
+          retention-days: 30
+
+      # 特征计算只读本地文件，不需要 API 密钥
+      - name: 计算特征宽表（feature_daily）
         run: python -m co_features.feature_engine
-        env:
-          ALPHA_VANTAGE_KEY: ${{ secrets.ALPHA_VANTAGE_KEY }}
 
       - name: 提交更新后的数据文件
         run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/raw/ data/features/
-          git commit -m "自动更新数据 $(date +'%Y-%m-%d')" || echo "无变化，跳过提交"
-          git push
+          if git diff --staged --quiet; then
+            echo "数据无变化，跳过提交"
+            exit 0
+          fi
+          git commit -m "自动更新数据 $(date -u +'%Y-%m-%d')"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
